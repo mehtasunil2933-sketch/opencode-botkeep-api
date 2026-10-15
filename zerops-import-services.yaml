@@ -1,0 +1,8 @@
+# Use INSIDE the existing opencode project only when vol already exists.
+# Do not import this if an opencode runtime service already exists.
+services:
+  - hostname: opencode
+    type: nodejs@22
+    minContainers: 1
+    maxContainers: 1
+    enableSubdomainAccess: true

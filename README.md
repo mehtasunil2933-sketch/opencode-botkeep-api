@@ -1,123 +1,221 @@
-# OpenCode API on Botkeep
+# OpenCode CLI Server on Zerops
 
-> **Deploying on Zerops instead?** Follow [ZEROPS.md](ZEROPS.md), starting with [zerops-import.yaml](zerops-import.yaml). This uses a separate project/volume and leaves Hermes untouched.
+Deploy **OpenCode 1.19.0** as a password-protected HTTP coding-agent API on Zerops, with **YOLO-style tool auto-approval** and **persistent workspace and session state**.
 
-OpenCode **1.19.0**, running as an authenticated headless HTTP API with tools auto-approved (`permission: "allow"`). This is OpenCode 1, not OpenCode 2. It is a coding-agent API, NOT an OpenAI-compatible `/v1/chat/completions` service.
+The repository name still includes `botkeep` because it began as a Botkeep starter. **Zerops is the primary deployment path below.** The separate [Botkeep guide](BOTKEEP.md) remains available.
 
-## Security and platform gate
+> **Security:** `permission: "allow"` automatically approves tools, including shell execution and file modifications. Anyone with API credentials can effectively control the workload and access its available secrets. Use a dedicated project/volume, HTTPS and narrowly scoped model credentials. Never mount Hermes data here. This is OpenCode's session/agent API, **not** an OpenAI-compatible `/v1/chat/completions` endpoint. This repo uses OpenCode 1, not OpenCode 2.
 
-**Anyone with API access can control this workload, execute commands and access its available credentials.** Use a dedicated workload, narrowly scoped provider keys, HTTPS and preferably network access controls. Never mount unrelated projects or credentials. OpenCode permissions do not replace OS/container isolation. Custom agents or project config can override global permission settings.
+## Files
 
-Botkeep's public Express starter says HTTP routing and TLS are not active in its preview. A preview configurator is NOT proof that a real runtime or public endpoint is provisioned. Confirm real process execution, npm package installation, allocated inbound port, HTTPS routing and persistent writable storage before proceeding. If these are unavailable, this repository alone cannot make a public API work. Do not enter real secrets in a demo/preview environment.
-
-## Step 1 — Import this repository
-
-1. Open https://botkeep.cloud/app/create and select a real Node.js application runtime, Node 22 or newer when available.
-2. Connect GitHub and authorize the Botkeep GitHub App for this private repository only.
-3. Select this repository, branch `main`, project root `/` (or leave the root field empty if that means the repository root).
-4. If private GitHub import is unavailable, download the repository ZIP and use Botkeep's ZIP importer; ensure package.json is at the configured project root.
-5. Start with about 1 GB RAM if your plan permits; this is a suggested starting allocation, not a measured requirement. Builds, language servers and tasks may need more RAM/disk.
-
-## Step 2 — Install dependencies
-
-Use `npm ci` as the installation/build command if Botkeep exposes that field. If the platform installs dependencies automatically, confirm the install succeeds in its logs. Start command: `npm start`.
-
-No Docker, SSH, sudo or global npm installation is required. The npm package still needs a compatible Linux runtime, executable binaries and permitted subprocess execution.
-
-## Step 3 — Environment and secrets
-
-Set these in the actual workload's Environment/Secrets section:
-
-| Variable | Value |
+| File | Purpose |
 | --- | --- |
-| PORT | Exact port Botkeep allocates/routes, e.g. 4096 only if that is the allocated port |
-| OPENCODE_SERVER_USERNAME | opencode |
-| OPENCODE_SERVER_PASSWORD | Unique random password, at least 24 characters |
-| OPENAI_API_KEY | Your API key if using OpenAI; use the appropriate provider credentials otherwise |
+| [zerops-import.yaml](zerops-import.yaml) | Create a NEW Lightweight project, Local Storage `vol` and Node.js `opencode` runtime |
+| [zerops-import-services.yaml](zerops-import-services.yaml) | Add ONLY the runtime to an existing project where `vol` already exists |
+| [zerops.yaml](zerops.yaml) | Ubuntu/Node 22 build, port 4096, persistent volume and deployment setups |
+| [package.json](package.json) / [package-lock.json](package-lock.json) | Exact OpenCode dependency and reproducible npm installation |
+| [start.mjs](start.mjs) | Validate password/port, set persistent XDG paths and start the authenticated server |
+| [opencode.json](opencode.json) | Enable tool auto-approval |
+| [.env.example](.env.example) | Environment-variable reference; NOT automatically loaded |
+| [ZEROPS.md](ZEROPS.md) | Expanded phased deployment, persistence checks, backup guidance and troubleshooting |
+| [BOTKEEP.md](BOTKEEP.md) | Original alternative hosting guide |
 
-The startup script also accepts `SERVER_PORT` if `PORT` is absent; it otherwise defaults to 4096. It refuses to start without the password. Do not paste provider keys or the server password into GitHub, chat, screenshots or README edits.
+## Architecture
 
-The `.env.example` file is documentation only: the app does not automatically load `.env`.
-
-Optional:
-- `OPENCODE_PROJECT_DIR`: an existing directory for the agent's working project. Default: repository root. Install/clone or upload the project first. Start with a small scratch project before trusting it with real code.
-- `OPENCODE_DATA_DIR`: a directory verified by Botkeep to persist across restarts AND redeployments. Default: `.opencode-data` in the deployment root. The script places XDG data/state/cache/config below this directory. Merely choosing a path does not make it persistent.
-
-Back up both the project and OpenCode state. Do not commit state: it can contain sessions and credentials. Stop the workload before making a consistent filesystem backup. Check platform backup/restore behavior before relying on it.
-
-## Step 4 — Start and verify networking
-
-Click Start/Deploy. Look for `Starting authenticated OpenCode on 0.0.0.0:...`. Match the listening port to the platform's allocated/routed port. Obtain the real HTTPS base URL from the platform; do not invent a hostname.
-
-Do not expose raw HTTP with Basic authentication over the public internet. If Botkeep cannot provide secure ingress, ask support whether supported secure routing is available before continuing.
-
-## Step 5 — Test from your own computer
-
-These examples use Bash, curl and jq. Avoid `set -x` when handling secrets.
-
-```bash
-export BASE_URL="https://YOUR-ACTUAL-HTTPS-ENDPOINT"
-export OPENCODE_USER="opencode"
-read -rsp "Server password: " OPENCODE_PASSWORD; echo
-
-# Authentication must be required: this should return 401.
-curl -s -o /dev/null -w '%{http_code}\n' "$BASE_URL/global/health"
-
-# Authenticated health: expect healthy:true and a version.
-curl --fail-with-body -u "$OPENCODE_USER:$OPENCODE_PASSWORD" \
-  "$BASE_URL/global/health"
-
-# Inspect available/connected providers and model IDs.
-curl --fail-with-body -u "$OPENCODE_USER:$OPENCODE_PASSWORD" \
-  "$BASE_URL/config/providers"
-
-# Create a session. Stop and inspect the response if this fails.
-SESSION_ID=$(curl --fail-with-body -sS \
-  -u "$OPENCODE_USER:$OPENCODE_PASSWORD" \
-  -H 'Content-Type: application/json' \
-  -d '{"title":"API smoke test"}' "$BASE_URL/session" | jq -er '.id')
-printf 'Session: %s\n' "$SESSION_ID"
+```text
+Your client -- HTTPS + Basic auth --> Zerops ingress --> opencode:4096
+                                                        |
+                                                        +-- /var/www
+                                                        |   replaceable deployment + npm dependencies
+                                                        |
+                                                        +-- /mnt/vol/workspace
+                                                        |   persistent working project / generated code
+                                                        |
+                                                        +-- /mnt/vol/opencode
+                                                            persistent XDG data/state/config/cache
 ```
 
-Set a model supported by your authenticated provider, using IDs returned by the provider endpoint:
+One application container is configured. `deploy.temporaryShutdown: true` removes the old application container before its replacement starts, avoiding overlapping app servers on the same state. Deployments intentionally have downtime. Volume directories are created only at runtime, not during build/prepare.
+
+## 1. Create the project or add the missing runtime
+
+### Option A — New project
+
+In Zerops choose **Import a project** and paste [zerops-import.yaml](zerops-import.yaml):
+
+```yaml
+project:
+  name: opencode
+  corePackage: LIGHT
+services:
+  - hostname: vol
+    type: local-storage:single@1
+  - hostname: opencode
+    type: nodejs@22
+    minContainers: 1
+    maxContainers: 1
+    enableSubdomainAccess: true
+```
+
+Choose your region and inspect the estimated resource cost. No free-credit amount or hosting price is guaranteed by this repository. The import intentionally does not start a Git build before you configure secrets.
+
+### Option B — Existing project with `vol`
+
+If your `opencode` project and `vol` Local Storage already exist, **do not create duplicates**. Open that project, choose **Import services**, and paste [zerops-import-services.yaml](zerops-import-services.yaml). It creates only the missing Node.js runtime. If the runtime also already exists, skip import entirely.
+
+**Check:** the project contains Local Storage `vol` and a Node.js runtime `opencode`. Do not substitute a Docker service or reuse the Hermes volume.
+
+## 2. Add secret environment variables
+
+In the **opencode service**, open **Environment variables** and add these as secrets:
+
+| Name | Value |
+| --- | --- |
+| `OPENCODE_SERVER_PASSWORD` | Unique random password of at least 24 characters |
+| `OPENAI_API_KEY` | Your OpenAI API key if using OpenAI; use the supported credential for your chosen provider otherwise |
+
+Generate a password locally and save it in a password manager:
 
 ```bash
+openssl rand -hex 24
+```
+
+Do not commit the generated value, provider keys or a real `.env`. Do not reuse Hermes' `API_SERVER_KEY`: this is a different server. The startup script deliberately refuses to start without a sufficiently long password.
+
+These non-secret settings are already in `zerops.yaml`; do not add conflicting duplicates in the GUI:
+
+```text
+PORT=4096
+OPENCODE_SERVER_USERNAME=opencode
+OPENCODE_PROJECT_DIR=/mnt/vol/workspace
+OPENCODE_DATA_DIR=/mnt/vol/opencode
+```
+
+## 3. Connect this private GitHub repository
+
+In the opencode service's **Pipelines / CI/CD settings**, connect GitHub and authorize access to this private repository:
+
+```text
+Repository: mehtasunil2933-sketch/opencode-botkeep-api
+Branch:     main
+Config:     zerops.yaml at repository root
+Setup:      opencode
+```
+
+Use the configuration/setup controls available in your Zerops UI; labels may vary. Do not make the repository public to work around missing GitHub authorization.
+
+**Recommended persistence gate before the first agent deployment:** select setup `opencode-persistence` instead, deploy twice, and check `cat /mnt/vol/deploys.log` in the runtime Web Shell after each deployment. Old content must survive. This setup runs `sleep infinity` and intentionally serves no HTTP endpoint. Once it passes, switch the selected setup to `opencode` and deploy. See [ZEROPS.md](ZEROPS.md) for the full gate.
+
+## 4. Deploy OpenCode
+
+Deploy setup **`opencode`** from **`main`**. The pipeline installs dependencies with `npm ci`, checks the startup script and deploys `node_modules` with the platform binary. No global npm install is needed.
+
+In the logs, check for version **1.19.0** and:
+
+```text
+Starting authenticated OpenCode on 0.0.0.0:4096
+```
+
+Use the actual **HTTPS subdomain** displayed by Zerops. The import enables subdomain access, and `zerops.yaml` declares port 4096 with HTTP support. Do not invent a hostname. Treat the built-in subdomain as an initial test endpoint; use suitable production ingress/access controls for production.
+
+## 5. Test authentication and health
+
+On your own computer, use Bash and curl:
+
+```bash
+export BASE_URL="https://YOUR-ACTUAL-ZEROPS-SUBDOMAIN"
+read -rsp "OpenCode server password: " OPENCODE_PASSWORD; echo
+
+# Without credentials: expect HTTP 401.
+curl -s -o /dev/null -w '%{http_code}\n' \
+  "$BASE_URL/global/health"
+
+# With credentials: expect healthy:true and version 1.19.0.
+curl --fail-with-body -u "opencode:$OPENCODE_PASSWORD" \
+  "$BASE_URL/global/health"
+
+# Discover provider configuration and actual model IDs.
+curl --fail-with-body -u "opencode:$OPENCODE_PASSWORD" \
+  "$BASE_URL/config/providers"
+```
+
+Do not proceed if unauthenticated access succeeds or HTTPS is invalid. Do not disable authentication to make an ingress health check pass; use an appropriate TCP check or authenticated local probe if needed.
+
+## 6. Create a session and send a coding task
+
+These examples also require `jq`. Set a provider/model you actually have access to; a provider key alone does not guarantee model access or billing credit.
+
+```bash
+SESSION_ID=$(curl --fail-with-body -sS \
+  -u "opencode:$OPENCODE_PASSWORD" \
+  -H 'Content-Type: application/json' \
+  -d '{"title":"Zerops API test"}' \
+  "$BASE_URL/session" | jq -er '.id')
+printf 'Session ID: %s\n' "$SESSION_ID"
+
 export PROVIDER_ID="openai"
 export MODEL_ID="REPLACE_WITH_AVAILABLE_MODEL_ID"
 
-jq -n --arg provider "$PROVIDER_ID" --arg model "$MODEL_ID" \
-  '{agent:"build", model:{providerID:$provider,modelID:$model},
-    parts:[{type:"text",text:"Create hello.txt in the current project containing Hello from OpenCode. Do not modify anything else."}]}' \
+jq -n --arg p "$PROVIDER_ID" --arg m "$MODEL_ID" \
+  '{agent:"build", model:{providerID:$p,modelID:$m},
+    parts:[{type:"text",text:"Create hello.txt in the current project containing Hello from OpenCode. Do not change anything else."}]}' \
   > /tmp/opencode-task.json
 
 curl --fail-with-body -sS \
-  -u "$OPENCODE_USER:$OPENCODE_PASSWORD" \
+  -u "opencode:$OPENCODE_PASSWORD" \
   -H 'Content-Type: application/json' \
   --data-binary @/tmp/opencode-task.json \
   "$BASE_URL/session/$SESSION_ID/message"
 ```
 
-This call can incur model-provider charges and creates a file in the workload. It waits for the agent response. For long tasks, POST the same body to `/session/$SESSION_ID/prompt_async`, then retrieve `/session/$SESSION_ID/message`. SSE events are available at `/event`; the host must support streaming without buffering for live events. Consult the running server's `/doc` for its exact schema.
+Stop if session creation fails. Model calls can incur charges. Inspect the task response for errors and verify `/mnt/vol/workspace/hello.txt` in the runtime Web Shell.
 
-For a browser client, configure explicit trusted CORS origins if needed; CORS is NOT authentication. Prefer a backend proxy so server credentials are not embedded in a public web app or distributed mobile binary. This starter does not add custom CORS origins.
+For long tasks, POST the same payload to `/session/$SESSION_ID/prompt_async`, then GET `/session/$SESSION_ID/message`. `/event` exposes SSE; your ingress must support unbuffered streaming for live events. The running server's `/doc` describes its exact API.
+
+## 7. Verify persistence across a redeploy
+
+1. Save the session ID and confirm `hello.txt` exists.
+2. Redeploy **setup `opencode`**, not merely restart.
+3. Check the file again in `/mnt/vol/workspace`.
+4. GET `/session/$SESSION_ID` and `/session/$SESSION_ID/message` using the same credentials.
+
+**Both the project file and session/history must survive.** Configuring a volume is not the same as verifying it in your account.
+
+## Backups, sizing and security
+
+- Back up BOTH `/mnt/vol/workspace` and `/mnt/vol/opencode`; state can contain credentials. Keep backups private and encrypted off-platform.
+- Do not copy only a live SQLite `.db` file. For a simple consistent volume backup, stop the runtime, take the platform backup while storage remains available, then restart. Test restore into an isolated project.
+- Start with roughly 1 GB application RAM if suitable and monitor actual usage; this is a suggestion, not a measured Zerops requirement. Builds and language servers can need more.
+- Keep min/max application containers at 1. Keep the temporary shutdown deployment setting.
+- `OPENCODE_PROJECT_DIR` selects a working directory; it does NOT sandbox shell execution. Agent-specific/project permission rules can override the global auto-approval setting.
+- Do not embed the server password in a public web app or distributed mobile binary. Prefer a trusted backend proxy. CORS is not authentication.
+- Add compilers, git or other runtime tools only when needed; mutable project/state data belongs on the volume, not `/var/www`.
+- Upgrade the exact OpenCode dependency and lockfile intentionally. Do not assume a state database can safely be downgraded.
 
 ## Troubleshooting
 
-- Password error: set a unique password of at least 24 characters in Environment and restart.
-- Binary missing: run `npm ci`; do not omit optional npm dependencies, because platform-specific binaries may require them.
-- Address in use / inaccessible: check allocated port, actual ingress and workload logs.
-- 401 with credentials: check username and secret values; never disable authentication as a workaround.
-- No connected models: check provider credentials, API account/billing, provider/model IDs and outbound connectivity.
-- Pending permission: inspect project/custom-agent configuration and the running config; it may override the global allow setting.
-- Data disappears: verify persistent storage behavior, including redeployments. The default directory is not a durability guarantee.
-- Process killed / out of memory: increase RAM or reduce concurrent tasks; consider build/language-server usage.
+| Symptom | Check |
+| --- | --- |
+| Password error | Service secret exists, is at least 24 characters, and reaches the runtime |
+| 502 | Correct setup? server running? port 4096 declared? password guard passed? |
+| 401 | Expected without auth; otherwise check credentials/proxy behavior |
+| Missing binary | `npm ci` succeeded, optional platform dependencies were retained and node_modules was deployed |
+| No usable model | Provider credentials, API billing/access, exact model IDs and outbound connectivity |
+| Missing sessions after redeploy | Correct volume, XDG paths, same project context and same session ID |
+| GitHub import denied | Authorize this private repository in Zerops GitHub integration |
+| Tools waiting for approval | Check custom-agent/project configuration overriding global permissions |
 
-## Sources
+## Validation status
 
-- https://opencode.ai/docs/
-- https://opencode.ai/docs/server/
-- https://opencode.ai/docs/permissions/
-- https://botkeep.cloud/docs/github
-- https://botkeep.cloud/templates/express-api
+Local checks passed for startup syntax, missing-password rejection, authenticated health, unauthenticated HTTP 401, loading auto-approval, and session/project-file survival across a local server restart with an external state directory. The YAML was syntax-checked locally and reviewed against the documentation below.
 
-This repository is a deployment starter, not a claim that it has been deployed or that Botkeep networking has been verified.
+**This is not a claim of a completed Zerops deployment.** Cloud build, HTTPS routing, real model calls, redeploy persistence and backup restore must be checked in your account. No provider inference was used in the local smoke tests.
+
+## Documentation
+
+- [Zerops configuration](https://docs.zerops.io/zerops-yaml/specification)
+- [Project/service import](https://docs.zerops.io/references/import)
+- [Mounting Local Storage](https://docs.zerops.io/local-storage/how-to/connect)
+- [Local Storage semantics and backups](https://docs.zerops.io/local-storage/overview)
+- [OpenCode 1 server API](https://opencode.ai/docs/server/)
+- [OpenCode 1 permissions](https://opencode.ai/docs/permissions/)
