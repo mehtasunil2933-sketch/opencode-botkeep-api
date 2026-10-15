@@ -1,0 +1,56 @@
+zerops:
+  - setup: opencode
+    build:
+      base: ubuntu/nodejs@22
+      buildCommands:
+        - npm ci --omit=dev --no-audit --no-fund
+        - npm run check
+        - ./node_modules/.bin/opencode --version
+      deployFiles:
+        - package.json
+        - package-lock.json
+        - start.mjs
+        - opencode.json
+        - node_modules
+    deploy:
+      # No overlapping old/new servers writing the same persistent state.
+      temporaryShutdown: true
+    run:
+      base: ubuntu/nodejs@22
+      volume:
+        hostname: vol
+        mountPath: /mnt/vol
+      envVariables:
+        NODE_ENV: production
+        PORT: "4096"
+        OPENCODE_SERVER_USERNAME: opencode
+        OPENCODE_PROJECT_DIR: /mnt/vol/workspace
+        OPENCODE_DATA_DIR: /mnt/vol/opencode
+      initCommands:
+        - mkdir -p /mnt/vol/workspace /mnt/vol/opencode
+        - chmod 700 /mnt/vol/opencode
+        - date -u >> /mnt/vol/deploys.log
+      start: npm start
+      ports:
+        - port: 4096
+          httpSupport: true
+
+  # Select this setup for the initial persistence gate, then switch to opencode.
+  - setup: opencode-persistence
+    build:
+      base: ubuntu/nodejs@22
+      buildCommands:
+        - echo "Persistence gate; no application dependencies needed"
+      deployFiles:
+        - package.json
+    deploy:
+      temporaryShutdown: true
+    run:
+      base: ubuntu/nodejs@22
+      volume:
+        hostname: vol
+        mountPath: /mnt/vol
+      initCommands:
+        - mkdir -p /mnt/vol/workspace /mnt/vol/opencode
+        - date -u >> /mnt/vol/deploys.log
+      start: sleep infinity

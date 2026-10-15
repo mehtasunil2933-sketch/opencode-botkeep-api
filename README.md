@@ -1,5 +1,7 @@
 # OpenCode API on Botkeep
 
+> **Deploying on Zerops instead?** Follow [ZEROPS.md](ZEROPS.md), starting with [zerops-import.yaml](zerops-import.yaml). This uses a separate project/volume and leaves Hermes untouched.
+
 OpenCode **1.19.0**, running as an authenticated headless HTTP API with tools auto-approved (`permission: "allow"`). This is OpenCode 1, not OpenCode 2. It is a coding-agent API, NOT an OpenAI-compatible `/v1/chat/completions` service.
 
 ## Security and platform gate

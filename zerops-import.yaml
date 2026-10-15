@@ -1,0 +1,11 @@
+project:
+  name: opencode
+  corePackage: LIGHT
+services:
+  - hostname: vol
+    type: local-storage:single@1
+  - hostname: opencode
+    type: nodejs@22
+    minContainers: 1
+    maxContainers: 1
+    enableSubdomainAccess: true
