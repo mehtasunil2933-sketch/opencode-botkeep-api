@@ -1,0 +1,12 @@
+{
+  "name": "opencode-botkeep-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Authenticated OpenCode 1 headless API for Botkeep",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node start.mjs",
+    "check": "node --check start.mjs"
+  },
+  "dependencies": { "opencode-ai": "1.19.0" }
+}
